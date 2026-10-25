@@ -167,8 +167,7 @@ export default function App() {
     <div className="app-shell">
       <header className="topbar">
         <a className="brand" href="/" aria-label="MP2 워크숍 팀 배정" onClick={(event) => { event.preventDefault(); selectPage('assignment') }}>
-          <span className="brand-mark">MP2</span>
-          <span className="brand-name">MP2 <span>WORKSHOP</span></span>
+          <span className="brand-name">MP2 WORKSHOP</span>
         </a>
         <nav className="main-nav" aria-label="주요 메뉴">
           {(Object.keys(pageLabels) as Page[]).map((item) => (
@@ -177,7 +176,6 @@ export default function App() {
             </button>
           ))}
         </nav>
-        <span className="event-pill"><span className="status-dot" /> {isSupabaseConfigured ? 'SUPABASE LIVE' : 'SUPABASE 미설정'}</span>
       </header>
 
       <main className="main-content">
@@ -205,7 +203,7 @@ export default function App() {
           : <AdminLoginPage signedIn={Boolean(session)} email={adminEmail} password={adminPassword} message={authMessage} onEmailChange={setAdminEmail} onPasswordChange={setAdminPassword} onSubmit={signInAdmin} onSignOut={signOutAdmin} />)}
       </main>
 
-      <footer className="footer"><span>MP2 WORKSHOP</span><span>Supabase에서 점수를 실시간 공유합니다</span></footer>
+      <footer className="footer"><span>MP2 WORKSHOP</span></footer>
     </div>
   )
 }
@@ -243,7 +241,6 @@ function AssignmentPage({ teams, onRedraw }: { teams: Team[]; onRedraw: () => vo
           )
         })}
       </section>
-      <p className="assignment-footnote">박보라 · 이진영 · 손민혁 · 이정인 · 박지은 · 김수정 우선 배정 규칙 적용</p>
     </section>
   )
 }
