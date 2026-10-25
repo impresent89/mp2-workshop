@@ -27,7 +27,9 @@ export const PARTICIPANTS: Participant[] = [
 
 export const TEAM_NAMES = ['RYAN TEAM', 'MUZI TEAM', 'APEACH TEAM']
 export const TEAM_SIZES = [4, 4, 5]
-const FIRST_STAGE_NAMES = ['박보라', '이진영', '손민혁', '이정인', '박지은', '김수정']
+
+const PRIORITY_NAMES = ['박보라', '이진영', '손민혁', '이정인', '박지은']
+const SEPARATE_NAME = '김수정'
 
 function balanceScore(
   teams: Team[],
@@ -40,6 +42,7 @@ function balanceScore(
     const mobile = team.members.filter((person) => person.part === 'mobile').length
     const female = team.members.filter((person) => person.gender === 'female').length
     const targetSize = targetSizes[index]
+
     return score
       + 4 * (mobile - (totalMobile * targetSize) / totalParticipants) ** 2
       + 4 * (female - (totalFemale * targetSize) / totalParticipants) ** 2
@@ -48,122 +51,140 @@ function balanceScore(
 
 function shuffle<T>(items: T[]): T[] {
   const shuffled = [...items]
+
   for (let index = shuffled.length - 1; index > 0; index -= 1) {
     const swapIndex = Math.floor(Math.random() * (index + 1))
     ;[shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]]
   }
+
   return shuffled
 }
 
 function isValidAssignment(value: unknown): value is Team[] {
   if (!Array.isArray(value) || value.length !== TEAM_NAMES.length) return false
+
   const teams = value as Team[]
-  if (!teams.every((team, index) => team?.name === TEAM_NAMES[index]
-    && Array.isArray(team.members) && team.members.length === TEAM_SIZES[index])) return false
+
+  if (!teams.every((team, index) =>
+    team?.name === TEAM_NAMES[index]
+    && Array.isArray(team.members)
+    && team.members.length === TEAM_SIZES[index],
+  )) return false
 
   const members = teams.flatMap((team) => team.members)
   const names = members.map((member) => member.name)
-  const firstStageCounts = teams.map((team) =>
-    team.members.filter((member) => FIRST_STAGE_NAMES.includes(member.name)).length,
+
+  if (
+    names.length !== PARTICIPANTS.length
+    || new Set(names).size !== PARTICIPANTS.length
+    || !PARTICIPANTS.every((participant) => names.includes(participant.name))
+  ) return false
+
+  const priorityCounts = teams.map((team) =>
+    team.members.filter((member) => PRIORITY_NAMES.includes(member.name)).length,
+  ).sort((a, b) => a - b)
+
+  const separateTeam = teams.find((team) =>
+    team.members.some((member) => member.name === SEPARATE_NAME),
   )
-  return names.length === PARTICIPANTS.length
-    && new Set(names).size === PARTICIPANTS.length
-    && PARTICIPANTS.every((participant) => names.includes(participant.name))
-    && firstStageCounts.filter((count) => count === 3).length === 2
-    && firstStageCounts.filter((count) => count === 0).length === 1
-    && firstStageCounts.every((count) => count === 0 || count === 3)
+
+  return priorityCounts.join(',') === '0,2,3'
+    && separateTeam !== undefined
+    && separateTeam.members.filter((member) =>
+      PRIORITY_NAMES.includes(member.name),
+    ).length === 0
 }
 
-/** Balances the priority group first, then balances all 13 participants. */
+/** 모든 우선배정 조합과 나머지 참가자 배정을 비교해 최적 균형 팀을 생성합니다. */
 export function generateTeamAssignment(): Team[] {
-  const priority = FIRST_STAGE_NAMES.map((name) => PARTICIPANTS.find((person) => person.name === name)!)
-  const remaining = PARTICIPANTS.filter((person) => !FIRST_STAGE_NAMES.includes(person.name))
-  const firstStageCandidates: { teams: Team[]; score: number; teamPair: string }[] = []
-
-  function assignPriority(
-    index: number,
-    firstTeamIndex: number,
-    secondTeamIndex: number,
-    firstMembers: Participant[],
-    secondMembers: Participant[],
-  ) {
-    if (index === priority.length) {
-      if (firstMembers.length !== 3 || secondMembers.length !== 3) return
-      const teams: Team[] = TEAM_NAMES.map((name, teamIndex) => ({
-        name,
-        members: teamIndex === firstTeamIndex
-          ? [...firstMembers]
-          : teamIndex === secondTeamIndex ? [...secondMembers] : [],
-      }))
-      firstStageCandidates.push({
-        teams,
-        score: balanceScore([teams[firstTeamIndex], teams[secondTeamIndex]], [3, 3], 6, 1, 3),
-        teamPair: `${firstTeamIndex}/${secondTeamIndex}`,
-      })
-      return
-    }
-
-    const person = priority[index]
-    if (firstMembers.length < 3) {
-      assignPriority(index + 1, firstTeamIndex, secondTeamIndex, [...firstMembers, person], secondMembers)
-    }
-    if (secondMembers.length < 3) {
-      assignPriority(index + 1, firstTeamIndex, secondTeamIndex, firstMembers, [...secondMembers, person])
-    }
-  }
-
-  for (let firstTeamIndex = 0; firstTeamIndex < TEAM_NAMES.length; firstTeamIndex += 1) {
-    for (let secondTeamIndex = firstTeamIndex + 1; secondTeamIndex < TEAM_NAMES.length; secondTeamIndex += 1) {
-      assignPriority(0, firstTeamIndex, secondTeamIndex, [], [])
-    }
-  }
-
-  // First compare team pairs by their best internal split, then randomly choose
-  // among equally balanced pairs before assigning the remaining participants.
-  const pairScores = new Map<string, number>()
-  firstStageCandidates.forEach(({ score, teamPair }) => {
-    const previousScore = pairScores.get(teamPair)
-    if (previousScore === undefined || score < previousScore) pairScores.set(teamPair, score)
-  })
-  const bestFirstStageScore = Math.min(...pairScores.values())
-  const bestTeamPairs = [...pairScores.entries()]
-    .filter(([, score]) => score === bestFirstStageScore)
-    .map(([teamPair]) => teamPair)
-  const selectedTeamPair = shuffle(bestTeamPairs)[0]
-  const selectedFirstStageScore = pairScores.get(selectedTeamPair)!
-  const selectedFirstStageCandidates = firstStageCandidates.filter(({ score, teamPair }) =>
-    teamPair === selectedTeamPair && score === selectedFirstStageScore,
+  const priority = PRIORITY_NAMES.map((name) =>
+    PARTICIPANTS.find((person) => person.name === name)!,
   )
-  const completedCandidates: { teams: Team[]; score: number }[] = []
+  const separate = PARTICIPANTS.find((person) => person.name === SEPARATE_NAME)!
+  const remaining = PARTICIPANTS.filter((person) =>
+    !PRIORITY_NAMES.includes(person.name) && person.name !== SEPARATE_NAME,
+  )
+
+  let bestScore = Infinity
+  let bestCandidates: Team[][] = []
+
+  function evaluate(teams: Team[]) {
+    if (!isValidAssignment(teams)) return
+
+    const score = balanceScore(
+      teams,
+      TEAM_SIZES,
+      PARTICIPANTS.length,
+      7,
+      7,
+    )
+
+    if (score < bestScore - 1e-9) {
+      bestScore = score
+      bestCandidates = [teams]
+    } else if (Math.abs(score - bestScore) < 1e-9) {
+      bestCandidates.push(teams)
+    }
+  }
 
   function assignRemaining(teams: Team[], index: number) {
     if (index === remaining.length) {
-      if (!isValidAssignment(teams)) return
-      completedCandidates.push({
-        teams,
-        score: balanceScore(teams, TEAM_SIZES, PARTICIPANTS.length, 7, 7),
-      })
+      evaluate(teams)
       return
     }
 
     const person = remaining[index]
+
     for (let teamIndex = 0; teamIndex < teams.length; teamIndex += 1) {
       if (teams[teamIndex].members.length >= TEAM_SIZES[teamIndex]) continue
-      const nextTeams = teams.map((team, currentIndex) => currentIndex === teamIndex
-        ? { ...team, members: [...team.members, person] }
-        : team)
+
+      const nextTeams = teams.map((team, currentIndex) =>
+        currentIndex === teamIndex
+          ? { ...team, members: [...team.members, person] }
+          : team,
+      )
+
       assignRemaining(nextTeams, index + 1)
     }
   }
 
-  // Keep the selected pair and best stage-one score fixed, then use the final
-  // score to choose among equally balanced internal splits and their completions.
-  selectedFirstStageCandidates.forEach(({ teams }) => assignRemaining(teams, 0))
-  if (completedCandidates.length === 0) throw new Error('유효한 팀 배정을 만들 수 없습니다.')
+  // 김수정이 배정될 팀을 먼저 선택합니다.
+  for (let separateTeamIndex = 0; separateTeamIndex < TEAM_NAMES.length; separateTeamIndex += 1) {
+    const otherTeamIndexes = TEAM_NAMES
+      .map((_, index) => index)
+      .filter((index) => index !== separateTeamIndex)
 
-  const bestScore = Math.min(...completedCandidates.map(({ score }) => score))
-  const bestCandidates = completedCandidates.filter(({ score }) => score === bestScore)
-  return shuffle(bestCandidates)[0].teams
+    // 나머지 두 팀 중 한 팀에 우선배정자 2명, 다른 팀에 3명을 배정합니다.
+    for (const twoPersonTeamIndex of otherTeamIndexes) {
+
+      // 우선배정자 5명 중 2명을 선택하는 모든 조합을 탐색합니다.
+      for (let first = 0; first < priority.length; first += 1) {
+        for (let second = first + 1; second < priority.length; second += 1) {
+          const twoPeople = [priority[first], priority[second]]
+          const threePeople = priority.filter(
+            (_, index) => index !== first && index !== second,
+          )
+
+          const teams: Team[] = TEAM_NAMES.map((name, index) => ({
+            name,
+            members: index === separateTeamIndex
+              ? [separate]
+              : index === twoPersonTeamIndex
+                ? [...twoPeople]
+                : [...threePeople],
+          }))
+
+          assignRemaining(teams, 0)
+        }
+      }
+    }
+  }
+
+  if (bestCandidates.length === 0) {
+    throw new Error('유효한 팀 배정을 만들 수 없습니다.')
+  }
+
+  return shuffle(bestCandidates)[0]
 }
 
 export function isTeamAssignmentValid(value: unknown): value is Team[] {
