@@ -180,7 +180,7 @@ export default function App() {
 
       <main className="main-content">
         {dataError && <p className="data-status-message" role="status">{dataError}</p>}
-        {page === 'assignment' && <AssignmentPage teams={teams} onRedraw={redrawTeams} />}
+        {page === 'assignment' && <AssignmentPage teams={teams} onRedraw={redrawTeams} isAdmin={isAdmin} />}
         {page === 'scoreboard' && <ScoreboardPage rankedTeams={rankedTeams} gameRecords={gameRecords} loading={recordsLoading} />}
         {page === 'manage' && (isAdmin
           ? <ManagePage
@@ -208,7 +208,7 @@ export default function App() {
   )
 }
 
-function AssignmentPage({ teams, onRedraw }: { teams: Team[]; onRedraw: () => void }) {
+function AssignmentPage({ teams, onRedraw, isAdmin }: { teams: Team[]; onRedraw: () => void; isAdmin: boolean }) {
   return (
     <section className="page assignment-page">
       <div className="participant-hero">
@@ -218,7 +218,7 @@ function AssignmentPage({ teams, onRedraw }: { teams: Team[]; onRedraw: () => vo
       </div>
       <div className="assignment-toolbar">
         <p>우선 배정과 파트·성별 균형을 반영한 팀 구성입니다.</p>
-        <button className="button button-regenerate" type="button" onClick={onRedraw}>다시 배정</button>
+        {isAdmin && <button className="button button-regenerate" type="button" onClick={onRedraw}>다시 배정</button>}
       </div>
       <section className="assignment-grid" aria-label="팀 배정 결과" aria-live="polite">
         {teams.map((team, index) => {
