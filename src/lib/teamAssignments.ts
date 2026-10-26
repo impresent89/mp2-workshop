@@ -115,6 +115,11 @@ export async function loadCurrentTeamAssignment(): Promise<Team[] | null> {
 
         return participant
       })
+      .sort(
+        (a, b) =>
+          PARTICIPANTS.findIndex((person) => person.name === a.name) -
+          PARTICIPANTS.findIndex((person) => person.name === b.name),
+      )
 
     return {
       name: teamName,

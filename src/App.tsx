@@ -1,9 +1,65 @@
+
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { Session } from '@supabase/supabase-js'
-import { generateTeamAssignment, TEAM_NAMES, TEAM_SIZES, type Team } from './lib/teamAssignment'
-import { loadCurrentTeamAssignment, saveTeamAssignment, subscribeToTeamAssignmentChanges } from './lib/teamAssignments'
-import { deleteGameRecord, loadGameRecords, rankTeamTotals, saveGameRecord, subscribeToGameRecords, type GameRecord } from './lib/teamScores'
+import {
+  generateTeamAssignment,
+  isTeamAssignmentValid,
+  PARTICIPANTS,
+  TEAM_NAMES,
+  TEAM_SIZES,
+  type Team,
+} from './lib/teamAssignment'
+import {
+  loadCurrentTeamAssignment,
+  saveTeamAssignment,
+  subscribeToTeamAssignmentChanges,
+} from './lib/teamAssignments'
+import {
+  deleteGameRecord,
+  loadGameRecords,
+  rankTeamTotals,
+  saveGameRecord,
+  subscribeToGameRecords,
+  type GameRecord,
+} from './lib/teamScores'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
+
+const ASSIGNMENT_CACHE_KEY = 'mp2-workshop-current-assignment'
+
+function readCachedAssignment(): Team[] | null {
+  try {
+    const cached = localStorage.getItem(ASSIGNMENT_CACHE_KEY)
+
+    if (!cached) return null
+
+    const parsed: unknown = JSON.parse(cached)
+
+    if (!isTeamAssignmentValid(parsed)) return null
+
+    return parsed.map((team) => ({
+      ...team,
+      members: [...team.members].sort(
+        (a, b) =>
+          PARTICIPANTS.findIndex((person) => person.name === a.name) -
+          PARTICIPANTS.findIndex((person) => person.name === b.name),
+      ),
+    }))
+  } catch {
+    return null
+  }
+}
+
+function saveCachedAssignment(teams: Team[] | null) {
+  try {
+    if (teams) {
+      localStorage.setItem(ASSIGNMENT_CACHE_KEY, JSON.stringify(teams))
+    } else {
+      localStorage.removeItem(ASSIGNMENT_CACHE_KEY)
+    }
+  } catch {
+    // 브라우저 저장소를 사용할 수 없어도 앱은 정상 동작하도록 한다.
+  }
+}
 
 type Page = 'assignment' | 'scoreboard' | 'manage'
 
@@ -20,13 +76,13 @@ function emptyTeamScores(): Record<string, string> {
 }
 
 export default function App() {
-  const [teams, setTeams] = useState<Team[] | null>(null)
+  const [teams, setTeams] = useState<Team[] | null>(() => readCachedAssignment())
   const [page, setPage] = useState<Page>('assignment')
   const [gameRecords, setGameRecords] = useState<GameRecord[]>([])
   const [session, setSession] = useState<Session | null>(null)
   const [recordsLoading, setRecordsLoading] = useState(true)
   const [dataError, setDataError] = useState('')
-  const [assignmentLoading, setAssignmentLoading] = useState(true)
+  const [assignmentLoading, setAssignmentLoading] = useState(() => teams === null)
   const [assignmentError, setAssignmentError] = useState('')
   const [assignmentSaving, setAssignmentSaving] = useState(false)
   const [editorOpen, setEditorOpen] = useState(false)
@@ -77,15 +133,16 @@ export default function App() {
 
       try {
         const currentTeams = await loadCurrentTeamAssignment()
+
         if (active) {
           setTeams(currentTeams)
+          saveCachedAssignment(currentTeams)
           setAssignmentError('')
         }
       } catch (error) {
         if (active) {
-          setTeams(null)
           setAssignmentError(
-            error instanceof Error ? error.message : '팀 배정을 불러오지 못했습니다.'
+            error instanceof Error ? error.message : '팀 배정을 불러오지 못했습니다.',
           )
         }
       } finally {
@@ -130,9 +187,10 @@ export default function App() {
       const newTeams = generateTeamAssignment()
       await saveTeamAssignment(newTeams)
       setTeams(newTeams)
+      saveCachedAssignment(newTeams)
     } catch (error) {
       setAssignmentError(
-        error instanceof Error ? error.message : '새 팀 배정을 저장하지 못했습니다.'
+        error instanceof Error ? error.message : '새 팀 배정을 저장하지 못했습니다.',
       )
     } finally {
       setAssignmentSaving(false)
@@ -166,20 +224,24 @@ export default function App() {
       setMessage('게임 이름을 입력해주세요.')
       return
     }
+
     const scores = Object.fromEntries(TEAM_NAMES.map((teamName) => {
       const input = scoreInputs[teamName]?.trim() ?? ''
       return [teamName, input === '' ? 0 : Number(input)]
     })) as Record<string, number>
+
     if (TEAM_NAMES.some((teamName) => !Number.isSafeInteger(scores[teamName]) || scores[teamName] < 0)) {
       setMessage('각 팀에 0 이상의 정수 점수를 입력해주세요.')
       return
     }
+
     try {
       const updatedRecords = await saveGameRecord({
         id: editingGameId ?? undefined,
         name: gameName,
         scores,
       })
+
       setGameRecords(updatedRecords)
       setEditorOpen(false)
       setEditingGameId(null)
@@ -208,6 +270,7 @@ export default function App() {
       setAuthMessage('Supabase 환경변수를 먼저 설정해주세요.')
       return
     }
+
     setAuthMessage('')
     const { data, error } = await supabase.auth.signInWithPassword({ email: adminEmail, password: adminPassword })
     if (error) {
@@ -215,6 +278,7 @@ export default function App() {
       setAuthMessage(`로그인 실패: ${error.message}`)
       return
     }
+
     setAdminPassword('')
     setAuthMessage(data.user.app_metadata?.workshop_role === 'admin'
       ? '관리자 인증을 완료했습니다.'
