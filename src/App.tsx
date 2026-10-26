@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { generateTeamAssignment, TEAM_NAMES, TEAM_SIZES, type Team } from './lib/teamAssignment'
+import { loadCurrentTeamAssignment, saveTeamAssignment, subscribeToTeamAssignmentChanges } from './lib/teamAssignments'
 import { deleteGameRecord, loadGameRecords, rankTeamTotals, saveGameRecord, subscribeToGameRecords, type GameRecord } from './lib/teamScores'
 import { isSupabaseConfigured, supabase } from './lib/supabase'
 
@@ -19,12 +20,15 @@ function emptyTeamScores(): Record<string, string> {
 }
 
 export default function App() {
-  const [teams, setTeams] = useState<Team[]>(generateTeamAssignment)
+  const [teams, setTeams] = useState<Team[] | null>(null)
   const [page, setPage] = useState<Page>('assignment')
   const [gameRecords, setGameRecords] = useState<GameRecord[]>([])
   const [session, setSession] = useState<Session | null>(null)
   const [recordsLoading, setRecordsLoading] = useState(true)
   const [dataError, setDataError] = useState('')
+  const [assignmentLoading, setAssignmentLoading] = useState(true)
+  const [assignmentError, setAssignmentError] = useState('')
+  const [assignmentSaving, setAssignmentSaving] = useState(false)
   const [editorOpen, setEditorOpen] = useState(false)
   const [editingGameId, setEditingGameId] = useState<string | null>(null)
   const [gameName, setGameName] = useState('')
@@ -39,6 +43,7 @@ export default function App() {
 
   useEffect(() => {
     let active = true
+
     const refreshRecords = async () => {
       if (!isSupabaseConfigured) {
         if (active) {
@@ -47,6 +52,7 @@ export default function App() {
         }
         return
       }
+
       try {
         const records = await loadGameRecords()
         if (active) {
@@ -60,21 +66,77 @@ export default function App() {
       }
     }
 
+    const refreshAssignment = async () => {
+      if (!isSupabaseConfigured) {
+        if (active) {
+          setAssignmentError('Supabase 환경변수를 설정해야 팀 배정을 불러올 수 있습니다.')
+          setAssignmentLoading(false)
+        }
+        return
+      }
+
+      try {
+        const currentTeams = await loadCurrentTeamAssignment()
+        if (active) {
+          setTeams(currentTeams)
+          setAssignmentError('')
+        }
+      } catch (error) {
+        if (active) {
+          setTeams(null)
+          setAssignmentError(
+            error instanceof Error ? error.message : '팀 배정을 불러오지 못했습니다.'
+          )
+        }
+      } finally {
+        if (active) setAssignmentLoading(false)
+      }
+    }
+
     void refreshRecords()
-    const unsubscribe = subscribeToGameRecords(() => { void refreshRecords() })
+    void refreshAssignment()
+
+    const unsubscribeRecords = subscribeToGameRecords(() => {
+      void refreshRecords()
+    })
+
+    const unsubscribeAssignment = subscribeToTeamAssignmentChanges(() => {
+      void refreshAssignment()
+    })
+
+    void supabase?.auth.getSession().then(({ data }) => {
+      if (active) setSession(data.session)
+    })
+
     const authSubscription = supabase?.auth.onAuthStateChange((_event, nextSession) => {
       if (active) setSession(nextSession)
     }).data.subscription
 
     return () => {
       active = false
-      unsubscribe()
+      unsubscribeRecords()
+      unsubscribeAssignment()
       authSubscription?.unsubscribe()
     }
   }, [])
 
-  function redrawTeams() {
-    setTeams(generateTeamAssignment())
+  async function redrawTeams() {
+    if (!isAdmin || assignmentSaving) return
+
+    setAssignmentSaving(true)
+    setAssignmentError('')
+
+    try {
+      const newTeams = generateTeamAssignment()
+      await saveTeamAssignment(newTeams)
+      setTeams(newTeams)
+    } catch (error) {
+      setAssignmentError(
+        error instanceof Error ? error.message : '새 팀 배정을 저장하지 못했습니다.'
+      )
+    } finally {
+      setAssignmentSaving(false)
+    }
   }
 
   function selectPage(nextPage: Page) {
@@ -181,7 +243,10 @@ export default function App() {
 
       <main className="main-content">
         {dataError && <p className="data-status-message" role="status">{dataError}</p>}
-        {page === 'assignment' && <AssignmentPage teams={teams} onRedraw={redrawTeams} isAdmin={isAdmin} />}
+        {page === 'assignment' && <>
+          {assignmentError && <p className="data-status-message" role="status">{assignmentError}</p>}
+          <AssignmentPage teams={teams} loading={assignmentLoading} saving={assignmentSaving} onRedraw={redrawTeams} isAdmin={isAdmin} />
+        </>}
         {page === 'scoreboard' && <ScoreboardPage rankedTeams={rankedTeams} gameRecords={gameRecords} loading={recordsLoading} />}
         {page === 'manage' && (isAdmin
           ? <ManagePage
@@ -209,7 +274,13 @@ export default function App() {
   )
 }
 
-function AssignmentPage({ teams, onRedraw, isAdmin }: { teams: Team[]; onRedraw: () => void; isAdmin: boolean }) {
+function AssignmentPage({ teams, loading, saving, onRedraw, isAdmin }: {
+  teams: Team[] | null
+  loading: boolean
+  saving: boolean
+  onRedraw: () => void
+  isAdmin: boolean
+}) {
   return (
     <section className="page assignment-page">
       <div className="participant-hero">
@@ -217,35 +288,65 @@ function AssignmentPage({ teams, onRedraw, isAdmin }: { teams: Team[]; onRedraw:
         <h1>오늘의 팀을 확인해요</h1>
         <p>13명의 참가자가 세 팀으로 나뉘었어요.</p>
       </div>
+
       <div className="assignment-toolbar">
         <p>우선 배정과 파트·성별 균형을 반영한 팀 구성입니다.</p>
-        {isAdmin && <button className="button button-regenerate" type="button" onClick={onRedraw}>다시 배정</button>}
+        {isAdmin && (
+          <button
+            className="button button-regenerate"
+            type="button"
+            onClick={onRedraw}
+            disabled={saving}
+          >
+            {saving ? '저장 중...' : '다시 배정'}
+          </button>
+        )}
       </div>
-      <section className="assignment-grid" aria-label="팀 배정 결과" aria-live="polite">
-        {teams.map((team, index) => {
-          const mobile = team.members.filter((person) => person.part === 'mobile').length
-          const female = team.members.filter((person) => person.gender === 'female').length
-          return (
-            <article className={`assignment-team team-card-${teamColors[index]}`} key={team.name}>
-              <div className="assignment-team-heading">
-                <span className={`assignment-team-icon team-color-${index + 1}`}>{teamEmojis[index]}</span>
-                <div>
-                  <h2>{team.name}</h2>
-                  <small className="assignment-team-theme">{team.theme}</small>
-                  <span>{team.members.length} / {TEAM_SIZES[index]}명</span>
+
+      {loading ? (
+        <p className="empty-scores">팀 배정을 불러오는 중입니다.</p>
+      ) : !teams ? (
+        <p className="empty-scores">
+          아직 표시할 수 있는 유효한 팀 배정이 없습니다.
+          {isAdmin ? ' 관리자 권한으로 다시 배정해주세요.' : ' 관리자에게 새 배정을 요청해주세요.'}
+        </p>
+      ) : (
+        <section className="assignment-grid" aria-label="팀 배정 결과" aria-live="polite">
+          {teams.map((team, index) => {
+            const mobile = team.members.filter((person) => person.part === 'mobile').length
+            const female = team.members.filter((person) => person.gender === 'female').length
+
+            return (
+              <article className={`assignment-team team-card-${teamColors[index]}`} key={team.name}>
+                <div className="assignment-team-heading">
+                  <span className={`assignment-team-icon team-color-${index + 1}`}>{teamEmojis[index]}</span>
+                  <div>
+                    <h2>{team.name}</h2>
+                    <small className="assignment-team-theme">{team.theme}</small>
+                    <span>{team.members.length} / {TEAM_SIZES[index]}명</span>
+                  </div>
                 </div>
-              </div>
-              <div className="assignment-stats">
-                <span>모바일 <strong>{mobile}</strong></span>
-                <span>PC <strong>{team.members.length - mobile}</strong></span>
-                <span>여성 <strong>{female}</strong></span>
-                <span>남성 <strong>{team.members.length - female}</strong></span>
-              </div>
-              <ul className="assignment-members">{team.members.map((person) => <li key={person.name}><span className="member-name">{person.name}</span><span className="member-meta">{person.part === 'mobile' ? 'Mobile' : 'PC'} · {person.gender === 'female' ? '여성' : '남성'}</span></li>)}</ul>
-            </article>
-          )
-        })}
-      </section>
+                <div className="assignment-stats">
+                  <span>모바일 <strong>{mobile}</strong></span>
+                  <span>PC <strong>{team.members.length - mobile}</strong></span>
+                  <span>여성 <strong>{female}</strong></span>
+                  <span>남성 <strong>{team.members.length - female}</strong></span>
+                </div>
+                <ul className="assignment-members">
+                  {team.members.map((person) => (
+                    <li key={person.name}>
+                      <span className="member-name">{person.name}</span>
+                      <span className="member-meta">
+                        {person.part === 'mobile' ? 'Mobile' : 'PC'} · {person.gender === 'female' ? '여성' : '남성'}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </article>
+            )
+          })}
+        </section>
+      )}
     </section>
   )
 }
