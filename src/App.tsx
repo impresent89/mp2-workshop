@@ -149,7 +149,8 @@ export default function App() {
     setAuthMessage('')
     const { data, error } = await supabase.auth.signInWithPassword({ email: adminEmail, password: adminPassword })
     if (error) {
-      setAuthMessage('로그인하지 못했습니다. 계정 정보를 확인해주세요.')
+      console.error('[Admin Login Error]', error)
+      setAuthMessage(`로그인 실패: ${error.message}`)
       return
     }
     setAdminPassword('')
@@ -228,7 +229,11 @@ function AssignmentPage({ teams, onRedraw, isAdmin }: { teams: Team[]; onRedraw:
             <article className={`assignment-team team-card-${teamColors[index]}`} key={team.name}>
               <div className="assignment-team-heading">
                 <span className={`assignment-team-icon team-color-${index + 1}`}>{teamEmojis[index]}</span>
-                <div><h2>{team.name}</h2><span>{team.members.length} / {TEAM_SIZES[index]}명</span></div>
+                <div>
+                  <h2>{team.name}</h2>
+                  <small className="assignment-team-theme">{team.theme}</small>
+                  <span>{team.members.length} / {TEAM_SIZES[index]}명</span>
+                </div>
               </div>
               <div className="assignment-stats">
                 <span>모바일 <strong>{mobile}</strong></span>

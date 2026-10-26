@@ -4,8 +4,11 @@ export type Participant = {
   gender: 'female' | 'male'
 }
 
+export type ThemeName = '해리포터' | '검은집' | '기억상실'
+
 export type Team = {
   name: string
+  theme: ThemeName
   members: Participant[]
 }
 
@@ -28,8 +31,9 @@ export const PARTICIPANTS: Participant[] = [
 export const TEAM_NAMES = ['RYAN TEAM', 'MUZI TEAM', 'APEACH TEAM']
 export const TEAM_SIZES = [4, 4, 5]
 
+const THEMES: ThemeName[] = ['해리포터', '검은집', '기억상실']
 const PRIORITY_NAMES = ['박보라', '이진영', '손민혁', '이정인', '박지은']
-const SEPARATE_NAME = '김수정'
+const MEMORY_NAME = '김수정'
 
 function balanceScore(
   teams: Team[],
@@ -67,9 +71,14 @@ function isValidAssignment(value: unknown): value is Team[] {
 
   if (!teams.every((team, index) =>
     team?.name === TEAM_NAMES[index]
+    && THEMES.includes(team.theme)
     && Array.isArray(team.members)
     && team.members.length === TEAM_SIZES[index],
   )) return false
+
+  if (new Set(teams.map((team) => team.theme)).size !== THEMES.length) {
+    return false
+  }
 
   const members = teams.flatMap((team) => team.members)
   const names = members.map((member) => member.name)
@@ -80,30 +89,44 @@ function isValidAssignment(value: unknown): value is Team[] {
     || !PARTICIPANTS.every((participant) => names.includes(participant.name))
   ) return false
 
-  const priorityCounts = teams.map((team) =>
-    team.members.filter((member) => PRIORITY_NAMES.includes(member.name)).length,
-  ).sort((a, b) => a - b)
+  const memoryTeam = teams.find((team) => team.theme === '기억상실')
+  const harryTeam = teams.find((team) => team.theme === '해리포터')
+  const blackTeam = teams.find((team) => team.theme === '검은집')
 
-  const separateTeam = teams.find((team) =>
-    team.members.some((member) => member.name === SEPARATE_NAME),
+  if (!memoryTeam || !harryTeam || !blackTeam) return false
+
+  if (!memoryTeam.members.some((member) => member.name === MEMORY_NAME)) {
+    return false
+  }
+
+  const priorityCount = (team: Team) =>
+    team.members.filter((member) => PRIORITY_NAMES.includes(member.name)).length
+
+  const counts = [priorityCount(harryTeam), priorityCount(memoryTeam)].sort(
+    (a, b) => a - b,
   )
 
-  return priorityCounts.join(',') === '0,2,3'
-    && separateTeam !== undefined
-    && separateTeam.members.filter((member) =>
-      PRIORITY_NAMES.includes(member.name),
-    ).length === 0
+  return counts[0] === 2
+    && counts[1] === 3
+    && priorityCount(blackTeam) === 0
 }
 
-/** 모든 우선배정 조합과 나머지 참가자 배정을 비교해 최적 균형 팀을 생성합니다. */
 export function generateTeamAssignment(): Team[] {
   const priority = PRIORITY_NAMES.map((name) =>
     PARTICIPANTS.find((person) => person.name === name)!,
   )
-  const separate = PARTICIPANTS.find((person) => person.name === SEPARATE_NAME)!
+
+  const memory = PARTICIPANTS.find((person) => person.name === MEMORY_NAME)!
+
   const remaining = PARTICIPANTS.filter((person) =>
-    !PRIORITY_NAMES.includes(person.name) && person.name !== SEPARATE_NAME,
+    !PRIORITY_NAMES.includes(person.name) && person.name !== MEMORY_NAME,
   )
+
+  // 매번 세 테마를 기존 팀에 무작위 연결합니다.
+  const themesByTeam = shuffle(THEMES)
+
+  const memoryTeamIndex = themesByTeam.indexOf('기억상실')
+  const harryTeamIndex = themesByTeam.indexOf('해리포터')
 
   let bestScore = Infinity
   let bestCandidates: Team[][] = []
@@ -148,40 +171,49 @@ export function generateTeamAssignment(): Team[] {
     }
   }
 
-  // 김수정이 배정될 팀을 먼저 선택합니다.
-  for (let separateTeamIndex = 0; separateTeamIndex < TEAM_NAMES.length; separateTeamIndex += 1) {
-    const otherTeamIndexes = TEAM_NAMES
-      .map((_, index) => index)
-      .filter((index) => index !== separateTeamIndex)
+  // 우선 배정자 5명 중 2명을 선택하는 모든 조합을 탐색합니다.
+  for (let first = 0; first < priority.length; first += 1) {
+    for (let second = first + 1; second < priority.length; second += 1) {
+      const twoPeople = [priority[first], priority[second]]
+      const threePeople = priority.filter(
+        (_, index) => index !== first && index !== second,
+      )
 
-    // 나머지 두 팀 중 한 팀에 우선배정자 2명, 다른 팀에 3명을 배정합니다.
-    for (const twoPersonTeamIndex of otherTeamIndexes) {
+      // 해리포터에 2명, 기억상실에 3명
+      // 또는 해리포터에 3명, 기억상실에 2명
+      for (const twoPersonTeamIndex of [harryTeamIndex, memoryTeamIndex]) {
+        const threePersonTeamIndex =
+          twoPersonTeamIndex === harryTeamIndex
+            ? memoryTeamIndex
+            : harryTeamIndex
 
-      // 우선배정자 5명 중 2명을 선택하는 모든 조합을 탐색합니다.
-      for (let first = 0; first < priority.length; first += 1) {
-        for (let second = first + 1; second < priority.length; second += 1) {
-          const twoPeople = [priority[first], priority[second]]
-          const threePeople = priority.filter(
-            (_, index) => index !== first && index !== second,
-          )
+        const twoPersonMembers =
+          twoPersonTeamIndex === memoryTeamIndex
+            ? [memory, ...twoPeople]
+            : twoPeople
 
-          const teams: Team[] = TEAM_NAMES.map((name, index) => ({
-            name,
-            members: index === separateTeamIndex
-              ? [separate]
-              : index === twoPersonTeamIndex
-                ? [...twoPeople]
-                : [...threePeople],
-          }))
+        const threePersonMembers =
+          threePersonTeamIndex === memoryTeamIndex
+            ? [memory, ...threePeople]
+            : threePeople
 
-          assignRemaining(teams, 0)
-        }
+        const teams: Team[] = TEAM_NAMES.map((name, index) => ({
+          name,
+          theme: themesByTeam[index],
+          members: index === twoPersonTeamIndex
+            ? [...twoPersonMembers]
+            : index === threePersonTeamIndex
+              ? [...threePersonMembers]
+              : [],
+        }))
+
+        assignRemaining(teams, 0)
       }
     }
   }
 
   if (bestCandidates.length === 0) {
-    throw new Error('유효한 팀 배정을 만들 수 없습니다.')
+    throw new Error('유효한 테마별 팀 배정을 만들 수 없습니다.')
   }
 
   return shuffle(bestCandidates)[0]
