@@ -35,6 +35,9 @@ const THEMES: ThemeName[] = ['해리포터', '검은집', '기억상실']
 const PRIORITY_NAMES = ['박보라', '이진영', '손민혁', '이정인', '박지은']
 const MEMORY_NAME = '김수정'
 
+const SERA_NAMES = ['박지은', '손민혁', '이진영']
+const RAEL_NAMES = ['이정인', '김수정', '이종태']
+
 function balanceScore(
   teams: Team[],
   targetSizes: number[],
@@ -131,8 +134,20 @@ export function generateTeamAssignment(): Team[] {
   let bestScore = Infinity
   let bestCandidates: Team[][] = []
 
+  function hasGroupConcentration(teams: Team[]): boolean {
+    return teams.some((team) => {
+      const memberNames = team.members.map((member) => member.name)
+      return (
+        SERA_NAMES.every((name) => memberNames.includes(name))
+        || RAEL_NAMES.every((name) => memberNames.includes(name))
+      )
+    })
+  }
+
   function evaluate(teams: Team[]) {
     if (!isValidAssignment(teams)) return
+    // 2차 검사: 나머지 인원까지 배정한 최종 후보 검사
+    if (hasGroupConcentration(teams)) return
 
     const score = balanceScore(
       teams,
@@ -141,7 +156,6 @@ export function generateTeamAssignment(): Team[] {
       7,
       7,
     )
-
     if (score < bestScore - 1e-9) {
       bestScore = score
       bestCandidates = [teams]
@@ -149,7 +163,6 @@ export function generateTeamAssignment(): Team[] {
       bestCandidates.push(teams)
     }
   }
-
   function assignRemaining(teams: Team[], index: number) {
     if (index === remaining.length) {
       evaluate(teams)
@@ -187,25 +200,22 @@ export function generateTeamAssignment(): Team[] {
             ? memoryTeamIndex
             : harryTeamIndex
 
-        const twoPersonMembers =
-          twoPersonTeamIndex === memoryTeamIndex
-            ? [memory, ...twoPeople]
-            : twoPeople
-
-        const threePersonMembers =
-          threePersonTeamIndex === memoryTeamIndex
-            ? [memory, ...threePeople]
-            : threePeople
-
+        // 김수정을 기억상실 팀에 먼저 배정한 뒤 우선 배정자를 추가합니다.
         const teams: Team[] = TEAM_NAMES.map((name, index) => ({
           name,
           theme: themesByTeam[index],
-          members: index === twoPersonTeamIndex
-            ? [...twoPersonMembers]
-            : index === threePersonTeamIndex
-              ? [...threePersonMembers]
-              : [],
+          members: [
+            ...(index === memoryTeamIndex ? [memory] : []),
+            ...(index === twoPersonTeamIndex
+              ? twoPeople
+              : index === threePersonTeamIndex
+                ? threePeople
+                : []),
+          ],
         }))
+
+        // 1차 검사: 우선 배정자 배치 직후 그룹 쏠림 검사
+        if (hasGroupConcentration(teams)) continue
 
         assignRemaining(teams, 0)
       }
